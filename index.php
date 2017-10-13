@@ -1,6 +1,6 @@
 <?php 
 
-require __DIR__ . './bootstrap/application.php';
+require __DIR__ . '/bootstrap/application.php';
 
 try {
 
