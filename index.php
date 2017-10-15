@@ -1,44 +1,58 @@
 <?php 
 
-require __DIR__ . '/bootstrap/application.php';
+use \Psr\Http\Message\ServerRequestInterface as Request;
+use \Psr\Http\Message\ResponseInterface as Response;
 
-try {
+require __DIR__.'/bootstrap.php';
 
-    $bot = new TelegramBot\Api\Client(getenv('TELEGRAM_BOT_API_TOKEN'));
+$app->map(['GET', 'POST'], "/{$settings['token']}", function (Request $request, Response $response){
+    $message = $request->getParsedBody();
+    $chatId  = $message['message']['chat']['id'];
 
-    $bot->command('test', function ($message) use ($bot){
-        $bot->sendMessage($message->getChat()->getId(), $message->getText());
-    });
+    if ($message['message']['text'] === '/go') {
+        $categories = $this->db->table('categories')->select('name')->get();
+        $categories = $categories->map(function($category){
+            return [$category->name];
+        })->toArray();
 
-    $bot->command('categories', function ($message) use ($bot){
-        $http = new GuzzleHttp\Client();
-        $categories = json_decode($http->request('GET', 'https://kudago.com/public-api/v1.3/event-categories/')->getBody());
-        $categoryButtons = [];
-
-        foreach ($categories as $category) {
-            $categoryButtons[] = [[
-                'text' => $category->name
-            ]];
+        if ($this->db->table('conversations')->where('chat_id', $chatId)->count() === 0) {
+            $this->db->table('conversations')->insert([
+                'chat_id' => $chatId,
+                'last_message' => '/go'
+            ]);
+        } else {
+            $this->db->table('conversations')->where('chat_id', $chatId)->update(['last_message' => '/go']);
         }
 
-        $keyboard = new TelegramBot\Api\Types\ReplyKeyboardMarkup($categoryButtons, true, true);
+        try {
+            $keyboard = new TelegramBot\Api\Types\ReplyKeyboardMarkup($categories, true, true);
+            $this->bot->sendMessage($chatId, 'Выберите категорию', null, false, null, $keyboard);
+        } catch (TelegramBot\Api\Exception $e) {
+            dd($e->getMessage());
+        }
+    } else {
+        // Otherwise session for /go command
+        $conversation = $this->db->table('conversations')->where('chat_id', $chatId)->first();
+        if ($conversation->last_message === '/go') {
+            $this->db->table('conversations')->where('chat_id', $chatId)->update(['last_message' => $message['message']['text']]);
+            $slug = $this->db->table('categories')->where('name', $message['message']['text'])->first()->slug;
+            $events = $this->http->get($this->settings['kudago_api'] . 'events',[
+                'query' => [
+                    'categories' => $slug,
+                    'fields' => implode(['title', 'site_url', 'description'], ','),
+                    'page_size' => 3,
+                    'text_format' => 'plain'
+                ]
+            ]);
+            $events = json_decode($events->getBody());
+            foreach ($events->results as $event) {
+                $textMessage  = "<strong>$event->title</strong>\n";
+                $textMessage .= $event->description . "\n" . $event->site_url;
+                echo $textMessage;
+                $this->bot->sendMessage($chatId, $textMessage, 'HTML');
+            }
+        }
+    }
+});
 
-        $bot->sendMessage($message->getChat()->getId(), 'Выберите категорию', null, false, null, $keyboard);
-    });
-
-    $bot->command('start', function ($message) use ($bot){
-
-        // $bot->sendMessage(
-        //     $message->getChat()->getId(), 
-        // );
-    });
-
-    $bot->run();
-
-} catch (TelegramBot\Api\Exception $e) {
-    echo $e->getMessage();
-}
-
-
-
-
+$app->run();

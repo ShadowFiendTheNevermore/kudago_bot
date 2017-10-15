@@ -1,0 +1,24 @@
+#!/usr/bin/env php
+<?php 
+require __DIR__ . '/bootstrap.php';
+
+$container->db->schema()->dropIfExists('conversations');
+$container->db->schema()->dropIfExists('categories');
+
+$container->db->schema()->create('conversations', function($table){
+    $table->increments('id');
+    $table->integer('chat_id')->unsigned()->unique();
+    $table->text('last_message');
+});
+
+$container->db->schema()->create('categories', function($table){
+    $table->increments('id');
+    $table->string('name');
+    $table->string('slug');
+});
+
+$categories = json_decode($container->http->get('https://kudago.com/public-api/v1.3/event-categories/?lang=ru')->getBody(), true);
+
+$container->db->table('categories')->insert($categories);
+
+
